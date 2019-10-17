@@ -44,7 +44,7 @@ func parseValue(b []byte, c *cache) (*Value, []byte, error) {
 		return v, b[1:], nil
 	}
 	if cur < 0xB8 {
-		v, tail, err := parseBytes(b[1:], 0, int(cur-0x80), c)
+		v, tail, err := parseBytes(b[1:], 0, uint64(cur-0x80), c)
 		if err != nil {
 			return nil, tail, fmt.Errorf("cannot parse short bytes: %s", err)
 		}
@@ -59,7 +59,7 @@ func parseValue(b []byte, c *cache) (*Value, []byte, error) {
 		if size < 56 {
 			return nil, nil, fmt.Errorf("bad size")
 		}
-		v, tail, err := parseBytes(b[intSize+1:], intSize, int(size), c)
+		v, tail, err := parseBytes(b[intSize+1:], uint64(intSize), size, c)
 		if err != nil {
 			return nil, tail, fmt.Errorf("cannot parse long bytes: %s", err)
 		}
@@ -85,8 +85,8 @@ func parseValue(b []byte, c *cache) (*Value, []byte, error) {
 	return v, tail, nil
 }
 
-func parseBytes(b []byte, bytes int, size int, c *cache) (*Value, []byte, error) {
-	if size > len(b) {
+func parseBytes(b []byte, bytes uint64, size uint64, c *cache) (*Value, []byte, error) {
+	if size > uint64(len(b)) {
 		return nil, nil, fmt.Errorf("length is not enough")
 	}
 
@@ -96,7 +96,7 @@ func parseBytes(b []byte, bytes int, size int, c *cache) (*Value, []byte, error)
 	v.l = uint64(size)
 	v.i = c.indx
 
-	c.indx += uint64(bytes+size) + 1
+	c.indx += bytes + size + 1
 	return v, b[size:], nil
 }
 
