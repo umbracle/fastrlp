@@ -92,7 +92,7 @@ type Value struct {
 // GetString returns string value.
 func (v *Value) GetString() (string, error) {
 	if v.t != TypeBytes {
-		return "", fmt.Errorf("bad item type")
+		return "", errNoBytes()
 	}
 	return string(v.b), nil
 }
@@ -100,7 +100,7 @@ func (v *Value) GetString() (string, error) {
 // GetElems returns the elements of an array.
 func (v *Value) GetElems() ([]*Value, error) {
 	if v.t != TypeArray {
-		return nil, fmt.Errorf("bad")
+		return nil, errNoArray()
 	}
 	return v.a, nil
 }
@@ -108,7 +108,7 @@ func (v *Value) GetElems() ([]*Value, error) {
 // GetBigInt returns big.int value.
 func (v *Value) GetBigInt(b *big.Int) error {
 	if v.t != TypeBytes {
-		return fmt.Errorf("bad")
+		return errNoBytes()
 	}
 	b.SetBytes(v.b)
 	return nil
@@ -117,7 +117,7 @@ func (v *Value) GetBigInt(b *big.Int) error {
 // GetBool returns bool value.
 func (v *Value) GetBool() (bool, error) {
 	if v.t != TypeBytes {
-		return false, fmt.Errorf("bad")
+		return false, errNoBytes()
 	}
 	if bytes.Equal(v.b, valueTrue.b) {
 		return true, nil
@@ -125,22 +125,30 @@ func (v *Value) GetBool() (bool, error) {
 	if bytes.Equal(v.b, valueFalse.b) {
 		return false, nil
 	}
-	return false, fmt.Errorf("not valid")
+	return false, fmt.Errorf("not a valid bool")
+}
+
+// Raw returns the raw bytes
+func (v *Value) Raw() []byte {
+	return v.b
 }
 
 // Bytes returns the raw bytes.
-func (v *Value) Bytes() []byte {
-	return v.b
+func (v *Value) Bytes() ([]byte, error) {
+	if v.t != TypeBytes {
+		return nil, errNoBytes()
+	}
+	return v.b, nil
 }
 
 // GetBytes returns bytes to dst.
 func (v *Value) GetBytes(dst []byte, bits ...int) ([]byte, error) {
 	if v.t != TypeBytes {
-		return nil, fmt.Errorf("bad")
+		return nil, errNoBytes()
 	}
 	if len(bits) > 0 {
 		if len(v.b) != bits[0] {
-			return nil, fmt.Errorf("bad length for hash, expected 32 but found %d", len(v.b))
+			return nil, fmt.Errorf("bad length, expected %d but found %d", bits[0], len(v.b))
 		}
 	}
 	dst = append(dst[:0], v.b...)
@@ -162,7 +170,10 @@ func (v *Value) GetHash(buf []byte) error {
 // GetUint64 returns uint64.
 func (v *Value) GetUint64() (uint64, error) {
 	if v.t != TypeBytes {
-		return 0, fmt.Errorf("bad")
+		return 0, errNoBytes()
+	}
+	if len(v.b) > 8 {
+		return 0, fmt.Errorf("bytes %d too long for uint64", len(v.b))
 	}
 
 	buf := bufPool.Get().(*[]byte)
@@ -305,4 +316,12 @@ func intsize(val uint64) uint64 {
 		return 7
 	}
 	return 8
+}
+
+func errNoBytes() error {
+	return fmt.Errorf("value is not of type bytes")
+}
+
+func errNoArray() error {
+	return fmt.Errorf("value is not of type array")
 }
