@@ -414,17 +414,34 @@ func generateUnmarshalField(f *field) string {
 		}`
 
 	case typeArray:
-		return `{
-			subElems, err := elems[{{.Indx}}].GetElems()
+		lenCheck := `subElems, err := elems[{{.Indx}}].GetElems()
 			if err != nil {
 				return err
-			}
-			for _, elem := range subElems {
+			}`
+
+		if f.obj == "" {
+			// []Hash
+			return `{
+				` + lenCheck + `
+				::.{{.Name}} = make([]Hash, len(subElems))
+				for indx, elem := range subElems {
+					if err := elem.GetHash(::.{{.Name}}[indx][:]); err != nil {
+						return err
+					}
+				}
+			}`
+		}
+
+		// []*Struct
+		return `{
+			` + lenCheck + `
+			::.{{.Name}} = make([]*{{.Obj}}, len(subElems))
+			for indx, elem := range subElems {
 				bb := xx{{.Obj}}{}
 				if err := bb.UnmarshalRLPFrom(elem); err != nil {
 					return err
 				}
-				::.{{.Name}} = append(::.{{.Name}}, bb)
+				::.{{.Name}}[indx] = bb
 			}
 		}`
 
@@ -505,6 +522,15 @@ func generateMarshalField(f *field) string {
 		return "vv.Set(::.{{.Name}}.MarshalRLPWith(ar))"
 
 	case typeArray:
+		if f.obj == "" {
+			return `{
+				v0 := ar.NewArray()
+				for _, item := range ::.{{.Name}} {
+					v0.Set(ar.NewBytes(item[:]))
+				}
+			}`
+		}
+
 		return `{
 			if len(::.{{.Name}}) == 0 {
 				vv.Set(ar.NewNullArray())
