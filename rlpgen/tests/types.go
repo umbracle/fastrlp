@@ -1,20 +1,28 @@
 package types
 
+import "github.com/umbracle/fastrlp/rlpgen/tests/external"
+
 type Hash [32]byte
 
 type Address [20]byte
 
-type Bloom [256]byte
+const (
+	// sszgen cannot decode this num so the user
+	// has to supply the length for Bloom as "--sizes Bloom=256"
+	num = 256
+)
 
-type Nonce [8]byte
-
-type Fixed [32]byte
+type Bloom [num]byte
 
 type Test1 struct {
-	A Fixed
+	A external.Fixed
 	B [32]byte
 	C []byte
 	D uint64
+}
+
+func a() {
+
 }
 
 type Header struct {
@@ -33,6 +41,8 @@ type Header struct {
 	ExtraData    []byte
 	MixHash      Hash
 	Nonce        Nonce
+
+	Hash Hash `rlp:"-"` // this field has to be avoided
 }
 
 type Transaction struct {

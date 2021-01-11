@@ -5,10 +5,12 @@ import (
 	"flag"
 	"fmt"
 	"go/ast"
+	"go/format"
 	"go/parser"
 	"go/token"
 	"html/template"
 	"io/ioutil"
+	"os"
 	"reflect"
 	"strconv"
 	"strings"
@@ -19,18 +21,22 @@ func main() {
 	var objsStr string
 	var output string
 	var include string
+	var packName string
+	var sizes string
 
 	flag.StringVar(&source, "path", "", "")
 	flag.StringVar(&objsStr, "objs", "", "")
 	flag.StringVar(&output, "output", "", "")
 	flag.StringVar(&include, "include", "", "")
+	flag.StringVar(&packName, "package", "", "")
+	flag.StringVar(&sizes, "sizes", "", "")
 
 	flag.Parse()
 
 	targets := decodeList(objsStr)
 	includeList := decodeList(include)
 
-	if _, err := process(source, targets, output, includeList); err != nil {
+	if _, err := process(source, targets, output, includeList, packName, sizes); err != nil {
 		fmt.Printf("[ERR]: %v", err)
 	}
 }
@@ -42,18 +48,9 @@ func decodeList(input string) []string {
 	return strings.Split(strings.TrimSpace(input), ",")
 }
 
-func process(source string, targetObjs []string, output string, includePaths []string) (string, error) {
-	// read ast file
-	file, err := parser.ParseFile(token.NewFileSet(), source, nil, parser.AllErrors)
-	if err != nil {
-		return "", err
-	}
-
-	// read package name
-	packName := file.Name.Name
-
+func process(source string, targetObjs []string, output string, includePaths []string, packName string, sizes string) (string, error) {
 	// decode the struct fields
-	structs := decodeStructs(file)
+	structs := decodeStructs(source, false)
 
 	// get the target structs
 	targets := []*astStruct{}
@@ -67,10 +64,35 @@ func process(source string, targetObjs []string, output string, includePaths []s
 		}
 	}
 
+	// fill in the structs from the include
+	for _, p := range includePaths {
+		include := decodeStructs(p, true)
+		structs = append(structs, include...)
+	}
+
+	c := &context{
+		astStructs: structs,
+		sizes:      map[string]uint64{},
+	}
+
+	// parse the sizes
+	if sizes != "" {
+		for _, raw := range strings.Split(sizes, ",") {
+			spl := strings.Split(raw, "=")
+			name, sizeStr := spl[0], spl[1]
+
+			size, err := strconv.ParseUint(sizeStr, 0, 64)
+			if err != nil {
+				return "", fmt.Errorf("BUG: Failed to convert to uint64 %s: %v", sizeStr, err)
+			}
+			c.sizes[name] = size
+		}
+	}
+
 	// process the targets
 	outs := []string{}
 	for _, s := range targets {
-		v, err := createIR(s, structs)
+		v, err := createIR(s, c)
 		if err != nil {
 			return "", err
 		}
@@ -101,13 +123,11 @@ func process(source string, targetObjs []string, output string, includePaths []s
 
 	resB := []byte(res)
 
-	/*
-		// format
-		resB, err = format.Source(resB)
-		if err != nil {
-			return "", err
-		}
-	*/
+	// format
+	resB, err := format.Source(resB)
+	if err != nil {
+		return "", err
+	}
 
 	// write output file
 	if err := ioutil.WriteFile(output, resB, 0644); err != nil {
@@ -130,10 +150,18 @@ func isByte(obj ast.Expr) bool {
 	return false
 }
 
-func getStruct(name string, contexts []*astStruct) *astStruct {
-	for _, i := range contexts {
-		if i.name == name {
-			return i
+type context struct {
+	astStructs []*astStruct
+	sizes      map[string]uint64
+}
+
+func (c *context) findStructByName(name string, pack string) *astStruct {
+	for _, obj := range c.astStructs {
+		if obj.name == name {
+			if pack != "" && pack != obj.pack {
+				continue
+			}
+			return obj
 		}
 	}
 	return nil
@@ -151,7 +179,7 @@ func getObjLen(obj *ast.ArrayType) uint64 {
 	return num
 }
 
-func createIR(target *astStruct, contexts []*astStruct) (*value, error) {
+func createIR(target *astStruct, context *context) (*value, error) {
 	if target.obj == nil {
 		return nil, fmt.Errorf("cannot do it for alias values")
 	}
@@ -166,7 +194,15 @@ func createIR(target *astStruct, contexts []*astStruct) (*value, error) {
 			continue
 		}
 
-		f := parseASTField(f.Type, contexts)
+		if f.Tag != nil {
+			if val, ok := getTags(f.Tag.Value, "rlp"); ok {
+				if val == "-" {
+					continue
+				}
+			}
+		}
+
+		f := parseASTField(f.Type, context)
 		f.name = name
 		f.indx = uint64(len(fields))
 
@@ -180,33 +216,33 @@ func createIR(target *astStruct, contexts []*astStruct) (*value, error) {
 	return v, nil
 }
 
-func findStructByName(contexts []*astStruct, name string) *astStruct {
-	for _, obj := range contexts {
-		if obj.name == name {
-			return obj
-		}
-	}
-	return nil
-}
-
-func parseStructRef(name string, contexts []*astStruct) *field {
+func parseStructRef(name string, pack string, context *context) *field {
 	// struct reference
-	target := findStructByName(contexts, name)
+	target := context.findStructByName(name, pack)
 	if target == nil {
-		panic("NOT FOUND")
+		panic(fmt.Sprintf("BUG: Target not found: %s", name))
 	}
 	if target.typ != nil {
-		// alias of basic type
+		// alias of basic type.
+
+		// Check if the type is from the user-defined fixedByte types
+		if num, ok := context.sizes[target.name]; ok {
+			// [user defined]byte
+			return &field{typ: typeFixedBytes, len: num}
+		}
+
+		fmt.Println(target.name)
 		return parseASTField(target.typ, nil)
 	}
 	// another struct
 	return &field{typ: typeObj, obj: name}
 }
 
-func parseASTField(expr ast.Expr, contexts []*astStruct) *field {
+func parseASTField(expr ast.Expr, context *context) *field {
 	switch obj := expr.(type) {
 	case *ast.ArrayType:
 		if isByte(obj.Elt) {
+			// check if the user defined the size for this struct
 			if fixedlen := getObjLen(obj); fixedlen != 0 {
 				// [fixedLen]byte
 				return &field{typ: typeFixedBytes, len: fixedlen}
@@ -215,7 +251,7 @@ func parseASTField(expr ast.Expr, contexts []*astStruct) *field {
 			return &field{typ: typeDynamicBytes}
 		}
 		// []*Struct
-		vv := parseASTField(obj.Elt, contexts)
+		vv := parseASTField(obj.Elt, context)
 		return &field{typ: typeArray, obj: vv.obj}
 
 	case *ast.Ident:
@@ -227,8 +263,15 @@ func parseASTField(expr ast.Expr, contexts []*astStruct) *field {
 			// byte
 			return &field{typ: typeByte}
 		}
-		// struct reference
-		return parseStructRef(name, contexts)
+		// struct reference without pointer
+		return parseStructRef(name, "", context)
+
+	case *ast.SelectorExpr:
+		// external.Struct
+		pack := obj.X.(*ast.Ident).Name
+		name := obj.Sel.Name
+
+		return parseStructRef(name, pack, context)
 
 	case *ast.StarExpr:
 		// *Struct
@@ -236,7 +279,7 @@ func parseASTField(expr ast.Expr, contexts []*astStruct) *field {
 		switch elem := obj.X.(type) {
 		case *ast.Ident:
 			// reference to a local package
-			f = parseStructRef(elem.Name, contexts)
+			f = parseStructRef(elem.Name, "", context)
 		}
 
 		if f.typ != typeObj {
@@ -244,7 +287,7 @@ func parseASTField(expr ast.Expr, contexts []*astStruct) *field {
 		}
 		return f
 	}
-	panic(fmt.Sprintf("BUG: %s", reflect.TypeOf(expr)))
+	panic(fmt.Sprintf("BUG: ast type not found %s", reflect.TypeOf(expr)))
 }
 
 func contains(i []string, j string) bool {
@@ -257,28 +300,81 @@ func contains(i []string, j string) bool {
 }
 
 type astStruct struct {
+	pack string
 	name string
 	obj  *ast.StructType
 	typ  ast.Expr
 }
 
-func decodeStructs(file *ast.File) []*astStruct {
-	res := []*astStruct{}
+func isDir(path string) (bool, error) {
+	fileInfo, err := os.Stat(path)
+	if err != nil {
+		return false, err
+	}
+	return fileInfo.IsDir(), nil
+}
 
-	for _, dec := range file.Decls {
-		if genDecl, ok := dec.(*ast.GenDecl); ok {
-			for _, spec := range genDecl.Specs {
-				if typeSpec, ok := spec.(*ast.TypeSpec); ok {
-					obj := &astStruct{
-						name: typeSpec.Name.Name,
+func parseInput(source string) (map[string]*ast.File, error) {
+	files := map[string]*ast.File{}
+
+	ok, err := isDir(source)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		// dir
+		astFiles, err := parser.ParseDir(token.NewFileSet(), source, nil, parser.AllErrors)
+		if err != nil {
+			return nil, err
+		}
+		for _, v := range astFiles {
+			if !strings.HasSuffix(v.Name, "_test") {
+				files = v.Files
+			}
+		}
+	} else {
+		// single file
+		astfile, err := parser.ParseFile(token.NewFileSet(), source, nil, parser.AllErrors)
+		if err != nil {
+			return nil, err
+		}
+		files[source] = astfile
+	}
+	return files, nil
+}
+
+func decodeStructs(source string, include bool) []*astStruct {
+	files, err := parseInput(source)
+	if err != nil {
+		panic(err)
+	}
+	if len(files) == 0 {
+		return nil
+	}
+
+	var packName string
+	for _, f := range files {
+		packName = f.Name.Name
+	}
+
+	res := []*astStruct{}
+	for _, file := range files {
+		for _, dec := range file.Decls {
+			if genDecl, ok := dec.(*ast.GenDecl); ok {
+				for _, spec := range genDecl.Specs {
+					if typeSpec, ok := spec.(*ast.TypeSpec); ok {
+						obj := &astStruct{
+							pack: packName,
+							name: typeSpec.Name.Name,
+						}
+						structType, ok := typeSpec.Type.(*ast.StructType)
+						if ok {
+							obj.obj = structType
+						} else {
+							obj.typ = typeSpec.Type
+						}
+						res = append(res, obj)
 					}
-					structType, ok := typeSpec.Type.(*ast.StructType)
-					if ok {
-						obj.obj = structType
-					} else {
-						obj.typ = typeSpec.Type
-					}
-					res = append(res, obj)
 				}
 			}
 		}
@@ -568,4 +664,31 @@ func execTmpl(tpl string, input map[string]interface{}) string {
 		out = strings.Replace(out, "::", sig.(string), -1)
 	}
 	return out
+}
+
+// getTags returns the tags from a given field
+func getTags(str string, field string) (string, bool) {
+	str = strings.Trim(str, "`")
+
+	for _, tag := range strings.Split(str, " ") {
+		if !strings.Contains(tag, ":") {
+			return "", false
+		}
+		spl := strings.Split(tag, ":")
+		if len(spl) != 2 {
+			return "", false
+		}
+
+		tagName, vals := spl[0], spl[1]
+		if !strings.HasPrefix(vals, "\"") || !strings.HasSuffix(vals, "\"") {
+			return "", false
+		}
+		if tagName != field {
+			continue
+		}
+
+		vals = strings.Trim(vals, "\"")
+		return vals, true
+	}
+	return "", false
 }
