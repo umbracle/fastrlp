@@ -49,6 +49,6 @@ func newKeccak(hash hashImpl) *Keccak {
 	}
 }
 
-func newKeccak256() *Keccak {
+func NewKeccak256() *Keccak {
 	return newKeccak(sha3.NewLegacyKeccak256().(hashImpl))
 }

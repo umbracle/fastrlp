@@ -16,7 +16,7 @@ type ParserPool struct {
 func (pp *ParserPool) Get() *Parser {
 	v := pp.pool.Get()
 	if v == nil {
-		return &Parser{kc: newKeccak256()}
+		return &Parser{k: NewKeccak256()}
 	}
 	return v.(*Parser)
 }
