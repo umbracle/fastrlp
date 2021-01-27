@@ -43,13 +43,13 @@ func (t *Test1) UnmarshalRLP(buf []byte) error {
 	if err != nil {
 		return err
 	}
-	if err := t.UnmarshalRLPFrom(vv); err != nil {
+	if err := t.UnmarshalRLPFrom(pr, vv); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (t *Test1) UnmarshalRLPFrom(v *fastrlp.Value) error {
+func (t *Test1) UnmarshalRLPFrom(p *fastrlp.Parser, v *fastrlp.Value) error {
 	elems, err := v.GetElems()
 	if err != nil {
 		return err
@@ -150,13 +150,13 @@ func (h *Header) UnmarshalRLP(buf []byte) error {
 	if err != nil {
 		return err
 	}
-	if err := h.UnmarshalRLPFrom(vv); err != nil {
+	if err := h.UnmarshalRLPFrom(pr, vv); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (h *Header) UnmarshalRLPFrom(v *fastrlp.Value) error {
+func (h *Header) UnmarshalRLPFrom(p *fastrlp.Parser, v *fastrlp.Value) error {
 	elems, err := v.GetElems()
 	if err != nil {
 		return err
@@ -164,6 +164,9 @@ func (h *Header) UnmarshalRLPFrom(v *fastrlp.Value) error {
 	if num := len(elems); num != 15 {
 		return fmt.Errorf("not enough elements to decode transaction, expected 9 but found %d", num)
 	}
+
+	// hash
+	p.Hash(h.Hash[:], v)
 
 	// Field 'ParentHash'
 	if err = elems[0].GetHash(h.ParentHash[:]); err != nil {
@@ -298,13 +301,13 @@ func (t *Transaction) UnmarshalRLP(buf []byte) error {
 	if err != nil {
 		return err
 	}
-	if err := t.UnmarshalRLPFrom(vv); err != nil {
+	if err := t.UnmarshalRLPFrom(pr, vv); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (t *Transaction) UnmarshalRLPFrom(v *fastrlp.Value) error {
+func (t *Transaction) UnmarshalRLPFrom(p *fastrlp.Parser, v *fastrlp.Value) error {
 	elems, err := v.GetElems()
 	if err != nil {
 		return err
@@ -411,13 +414,13 @@ func (b *Body) UnmarshalRLP(buf []byte) error {
 	if err != nil {
 		return err
 	}
-	if err := b.UnmarshalRLPFrom(vv); err != nil {
+	if err := b.UnmarshalRLPFrom(pr, vv); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (b *Body) UnmarshalRLPFrom(v *fastrlp.Value) error {
+func (b *Body) UnmarshalRLPFrom(p *fastrlp.Parser, v *fastrlp.Value) error {
 	elems, err := v.GetElems()
 	if err != nil {
 		return err
@@ -435,7 +438,7 @@ func (b *Body) UnmarshalRLPFrom(v *fastrlp.Value) error {
 		b.Transactions = make([]*Transaction, len(subElems))
 		for indx, elem := range subElems {
 			bb := &Transaction{}
-			if err := bb.UnmarshalRLPFrom(elem); err != nil {
+			if err := bb.UnmarshalRLPFrom(p, elem); err != nil {
 				return err
 			}
 			b.Transactions[indx] = bb
@@ -451,7 +454,7 @@ func (b *Body) UnmarshalRLPFrom(v *fastrlp.Value) error {
 		b.Uncles = make([]*Header, len(subElems))
 		for indx, elem := range subElems {
 			bb := &Header{}
-			if err := bb.UnmarshalRLPFrom(elem); err != nil {
+			if err := bb.UnmarshalRLPFrom(p, elem); err != nil {
 				return err
 			}
 			b.Uncles[indx] = bb
@@ -514,13 +517,13 @@ func (b *Block) UnmarshalRLP(buf []byte) error {
 	if err != nil {
 		return err
 	}
-	if err := b.UnmarshalRLPFrom(vv); err != nil {
+	if err := b.UnmarshalRLPFrom(pr, vv); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (b *Block) UnmarshalRLPFrom(v *fastrlp.Value) error {
+func (b *Block) UnmarshalRLPFrom(p *fastrlp.Parser, v *fastrlp.Value) error {
 	elems, err := v.GetElems()
 	if err != nil {
 		return err
@@ -532,7 +535,7 @@ func (b *Block) UnmarshalRLPFrom(v *fastrlp.Value) error {
 	// Field 'Header'
 	{
 		b.Header = &Header{}
-		if err := b.Header.UnmarshalRLPFrom(elems[0]); err != nil {
+		if err := b.Header.UnmarshalRLPFrom(p, elems[0]); err != nil {
 			return err
 		}
 	}
@@ -546,7 +549,7 @@ func (b *Block) UnmarshalRLPFrom(v *fastrlp.Value) error {
 		b.Transactions = make([]*Transaction, len(subElems))
 		for indx, elem := range subElems {
 			bb := &Transaction{}
-			if err := bb.UnmarshalRLPFrom(elem); err != nil {
+			if err := bb.UnmarshalRLPFrom(p, elem); err != nil {
 				return err
 			}
 			b.Transactions[indx] = bb
@@ -562,7 +565,7 @@ func (b *Block) UnmarshalRLPFrom(v *fastrlp.Value) error {
 		b.Uncles = make([]*Header, len(subElems))
 		for indx, elem := range subElems {
 			bb := &Header{}
-			if err := bb.UnmarshalRLPFrom(elem); err != nil {
+			if err := bb.UnmarshalRLPFrom(p, elem); err != nil {
 				return err
 			}
 			b.Uncles[indx] = bb
@@ -615,13 +618,13 @@ func (r *Receipt) UnmarshalRLP(buf []byte) error {
 	if err != nil {
 		return err
 	}
-	if err := r.UnmarshalRLPFrom(vv); err != nil {
+	if err := r.UnmarshalRLPFrom(pr, vv); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (r *Receipt) UnmarshalRLPFrom(v *fastrlp.Value) error {
+func (r *Receipt) UnmarshalRLPFrom(p *fastrlp.Parser, v *fastrlp.Value) error {
 	elems, err := v.GetElems()
 	if err != nil {
 		return err
@@ -649,7 +652,7 @@ func (r *Receipt) UnmarshalRLPFrom(v *fastrlp.Value) error {
 		r.Logs = make([]*Log, len(subElems))
 		for indx, elem := range subElems {
 			bb := &Log{}
-			if err := bb.UnmarshalRLPFrom(elem); err != nil {
+			if err := bb.UnmarshalRLPFrom(p, elem); err != nil {
 				return err
 			}
 			r.Logs[indx] = bb
@@ -697,13 +700,13 @@ func (l *Log) UnmarshalRLP(buf []byte) error {
 	if err != nil {
 		return err
 	}
-	if err := l.UnmarshalRLPFrom(vv); err != nil {
+	if err := l.UnmarshalRLPFrom(pr, vv); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (l *Log) UnmarshalRLPFrom(v *fastrlp.Value) error {
+func (l *Log) UnmarshalRLPFrom(p *fastrlp.Parser, v *fastrlp.Value) error {
 	elems, err := v.GetElems()
 	if err != nil {
 		return err

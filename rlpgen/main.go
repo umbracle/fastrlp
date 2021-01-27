@@ -22,21 +22,19 @@ func main() {
 	var output string
 	var include string
 	var packName string
-	var sizes string
 
 	flag.StringVar(&source, "path", "", "")
 	flag.StringVar(&objsStr, "objs", "", "")
 	flag.StringVar(&output, "output", "", "")
 	flag.StringVar(&include, "include", "", "")
 	flag.StringVar(&packName, "package", "", "")
-	flag.StringVar(&sizes, "sizes", "", "")
 
 	flag.Parse()
 
 	targets := decodeList(objsStr)
 	includeList := decodeList(include)
 
-	if _, err := process(source, targets, output, includeList, packName, sizes); err != nil {
+	if _, err := process(source, targets, output, includeList, packName); err != nil {
 		fmt.Printf("[ERR]: %v", err)
 	}
 }
@@ -48,7 +46,7 @@ func decodeList(input string) []string {
 	return strings.Split(strings.TrimSpace(input), ",")
 }
 
-func process(source string, targetObjs []string, output string, includePaths []string, packName string, sizes string) (string, error) {
+func process(source string, targetObjs []string, output string, includePaths []string, packName string) (string, error) {
 	// decode the struct fields
 	structs := decodeStructs(source, false)
 
@@ -72,21 +70,6 @@ func process(source string, targetObjs []string, output string, includePaths []s
 
 	c := &context{
 		astStructs: structs,
-		sizes:      map[string]uint64{},
-	}
-
-	// parse the sizes
-	if sizes != "" {
-		for _, raw := range strings.Split(sizes, ",") {
-			spl := strings.Split(raw, "=")
-			name, sizeStr := spl[0], spl[1]
-
-			size, err := strconv.ParseUint(sizeStr, 0, 64)
-			if err != nil {
-				return "", fmt.Errorf("BUG: Failed to convert to uint64 %s: %v", sizeStr, err)
-			}
-			c.sizes[name] = size
-		}
 	}
 
 	// process the targets
@@ -152,7 +135,6 @@ func isByte(obj ast.Expr) bool {
 
 type context struct {
 	astStructs []*astStruct
-	sizes      map[string]uint64
 }
 
 func (c *context) findStructByName(name string, pack string) *astStruct {
@@ -184,7 +166,10 @@ func createIR(target *astStruct, context *context) (*value, error) {
 		return nil, fmt.Errorf("cannot do it for alias values")
 	}
 
-	fields := []*field{}
+	v := &value{
+		fields: []*field{},
+		name:   target.name,
+	}
 	for _, f := range target.obj.Fields.List {
 		if len(f.Names) != 1 {
 			continue
@@ -198,22 +183,26 @@ func createIR(target *astStruct, context *context) (*value, error) {
 			if val, ok := getTags(f.Tag.Value, "rlp"); ok {
 				if val == "-" {
 					continue
+				} else if val == "hash" {
+					v.hashVal = name
+					continue
 				}
 			}
 		}
 
 		f := parseASTField(f.Type, context)
 		f.name = name
-		f.indx = uint64(len(fields))
+		f.indx = uint64(len(v.fields))
 
-		fields = append(fields, f)
-	}
-
-	v := &value{
-		fields: fields,
-		name:   target.name,
+		v.fields = append(v.fields, f)
 	}
 	return v, nil
+}
+
+var sizes = map[string]uint64{
+	"Hash":    32,
+	"Address": 20,
+	"Bloom":   256,
 }
 
 func parseStructRef(name string, pack string, context *context) *field {
@@ -226,12 +215,10 @@ func parseStructRef(name string, pack string, context *context) *field {
 		// alias of basic type.
 
 		// Check if the type is from the user-defined fixedByte types
-		if num, ok := context.sizes[target.name]; ok {
+		if num, ok := sizes[target.name]; ok {
 			// [user defined]byte
 			return &field{typ: typeFixedBytes, len: num}
 		}
-
-		fmt.Println(target.name)
 		return parseASTField(target.typ, nil)
 	}
 	// another struct
@@ -408,8 +395,13 @@ type field struct {
 
 // value represents a Go struct
 type value struct {
-	name   string
-	fields []*field
+	name    string
+	fields  []*field
+	hashVal string
+}
+
+func (v *value) hasHash() bool {
+	return v.hashVal != ""
 }
 
 // --- Generation ---
@@ -423,20 +415,20 @@ func generateUnmarshal(v *value) string {
 		if err != nil {
 			return err
 		}
-		if err := ::.UnmarshalRLPFrom(vv); err != nil {
+		if err := ::.UnmarshalRLPFrom(pr, vv); err != nil {
 			return err
 		}
 		return nil
 	}
 
-	func (:: *{{.Name}}) UnmarshalRLPFrom(v *fastrlp.Value) error {
+	func (:: *{{.Name}}) UnmarshalRLPFrom(p *fastrlp.Parser, v *fastrlp.Value) error {
 		elems, err := v.GetElems()
 		if err != nil {
 			return err
 		}
 		if num := len(elems); num != {{.Len}} {
 			return fmt.Errorf("not enough elements to decode transaction, expected 9 but found %d", num)
-		}
+		} {{.Hash}}
 		{{range $val := .Fields}}
 		{{$val}}
 		{{end}}
@@ -457,11 +449,19 @@ func generateUnmarshal(v *value) string {
 		fieldsOut = append(fieldsOut, out)
 	}
 
+	var doHash string
+	if v.hasHash() {
+		doHash = `
+		
+		// hash
+		p.Hash(::.` + v.hashVal + `[:], v)`
+	}
 	return execTmpl(tmpl, map[string]interface{}{
 		"Name":   v.name,
 		"Fields": fieldsOut,
 		"Len":    len(v.fields),
 		"Sig":    getSignature(v),
+		"Hash":   doHash,
 	})
 }
 
@@ -504,7 +504,7 @@ func generateUnmarshalField(f *field) string {
 	case typeObj:
 		return `{
 			::.{{.Name}} = xx{{.Obj}}{}
-			if err := ::.{{.Name}}.UnmarshalRLPFrom(elems[{{.Indx}}]); err != nil {
+			if err := ::.{{.Name}}.UnmarshalRLPFrom(p, elems[{{.Indx}}]); err != nil {
 				return err
 			}
 		}`
@@ -534,7 +534,7 @@ func generateUnmarshalField(f *field) string {
 			::.{{.Name}} = make([]*{{.Obj}}, len(subElems))
 			for indx, elem := range subElems {
 				bb := xx{{.Obj}}{}
-				if err := bb.UnmarshalRLPFrom(elem); err != nil {
+				if err := bb.UnmarshalRLPFrom(p, elem); err != nil {
 					return err
 				}
 				::.{{.Name}}[indx] = bb

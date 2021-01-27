@@ -6,23 +6,13 @@ type Hash [32]byte
 
 type Address [20]byte
 
-const (
-	// sszgen cannot decode this num so the user
-	// has to supply the length for Bloom as "--sizes Bloom=256"
-	num = 256
-)
-
-type Bloom [num]byte
+type Bloom [256]byte
 
 type Test1 struct {
 	A external.Fixed
 	B [32]byte
 	C []byte
 	D uint64
-}
-
-func a() {
-
 }
 
 type Header struct {
@@ -42,7 +32,7 @@ type Header struct {
 	MixHash      Hash
 	Nonce        Nonce
 
-	Hash Hash `rlp:"-"` // this field has to be avoided
+	Hash Hash `rlp:"hash"`
 }
 
 type Transaction struct {
