@@ -642,8 +642,9 @@ func generateMarshalField(f *field) string {
 			return `{
 				v0 := ar.NewArray()
 				for _, item := range ::.{{.Name}} {
-					v0.Set(ar.NewBytes(item[:]))
+					v0.Set(ar.NewBytes(item.Bytes()))
 				}
+				vv.Set(v0)
 			}`
 		}
 
