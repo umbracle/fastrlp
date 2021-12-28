@@ -1,6 +1,7 @@
 package fastrlp
 
 import (
+	"bytes"
 	"reflect"
 
 	fuzz "github.com/google/gofuzz"
@@ -32,7 +33,14 @@ func Fuzz(num int, obj FuzzObject) error {
 		if err := obj2.UnmarshalRLP(data); err != nil {
 			return err
 		}
-		if !reflect.DeepEqual(obj, obj2) {
+
+		// instead of relying on DeepEqual and issues with zero arrays and so on
+		// we use the rlp marshal values to compare
+		data2, err := obj2.MarshalRLPTo(nil)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(data, data2) {
 			return &FuzzError{Source: obj, Target: obj2}
 		}
 		return nil
