@@ -20,9 +20,20 @@ func (f *FuzzError) Error() string {
 	return "failed to encode fuzz object"
 }
 
-func Fuzz(num int, obj FuzzObject) error {
+type FuzzOption func(f *fuzz.Fuzzer) *fuzz.Fuzzer
+
+func WithFuncts(fuzzFuncts ...interface{}) FuzzOption {
+	return func(f *fuzz.Fuzzer) *fuzz.Fuzzer {
+		return f.Funcs(fuzzFuncts...)
+	}
+}
+
+func Fuzz(num int, obj FuzzObject, opts ...FuzzOption) error {
 	fuzzImpl := func() error {
 		f := fuzz.New()
+		for _, opt := range opts {
+			f = opt(f)
+		}
 		f.Fuzz(obj)
 
 		data, err := obj.MarshalRLPTo(nil)
