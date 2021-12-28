@@ -28,19 +28,27 @@ func WithFuncts(fuzzFuncts ...interface{}) FuzzOption {
 	}
 }
 
-func Fuzz(num int, obj FuzzObject, opts ...FuzzOption) error {
+func copyObj(obj interface{}) interface{} {
+	return reflect.New(reflect.TypeOf(obj).Elem()).Interface()
+}
+
+func Fuzz(num int, base FuzzObject, opts ...FuzzOption) error {
+	f := fuzz.New()
+	for _, opt := range opts {
+		f = opt(f)
+	}
+
 	fuzzImpl := func() error {
-		f := fuzz.New()
-		for _, opt := range opts {
-			f = opt(f)
-		}
+		obj := copyObj(base).(FuzzObject)
 		f.Fuzz(obj)
+
+		obj2 := copyObj(base).(FuzzObject)
+		f.Fuzz(obj2)
 
 		data, err := obj.MarshalRLPTo(nil)
 		if err != nil {
 			return err
 		}
-		obj2 := reflect.New(reflect.TypeOf(obj).Elem()).Interface().(FuzzObject)
 		if err := obj2.UnmarshalRLP(data); err != nil {
 			return err
 		}
