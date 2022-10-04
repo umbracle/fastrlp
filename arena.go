@@ -86,7 +86,7 @@ func (a *Arena) NewTrue() *Value {
 
 // NewFalse returns a false value.
 func (a *Arena) NewFalse() *Value {
-	return valueTrue
+	return valueFalse
 }
 
 // NewNullArray returns a null array value.
