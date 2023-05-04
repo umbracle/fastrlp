@@ -39,11 +39,7 @@ func (a *Arena) NewCopyBytes(b []byte) *Value {
 
 // NewBytes returns a bytes value.
 func (a *Arena) NewBytes(b []byte) *Value {
-	v := a.c.getValue()
-	v.t = TypeBytes
-	v.b = b
-	v.l = uint64(len(b))
-	return v
+	return a.NewCopyBytes(b)
 }
 
 // NewUint returns a new uint value.
